@@ -1,0 +1,21 @@
+{
+  "name": "agent-roundtable",
+  "version": "0.1.0",
+  "description": "ask: persistent multi-model discussions between you, Codex CLI and Claude Code",
+  "type": "module",
+  "bin": {
+    "ask": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc",
+    "test": "node --test 'test/**/*.test.ts'"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "^7.0.2"
+  }
+}

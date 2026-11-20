@@ -11,6 +11,7 @@ agent-roundtable/
 ├── src/
 │   ├── cli.ts              # argv parsing, dispatch, usage, exit codes
 │   ├── commands.ts         # new | add | list | show | use | <agent> [prompt]
+│   ├── errors.ts           # AskError: user-facing errors (message only, exit 1)
 │   ├── store.ts            # storage dir, .active, next id, read/append, list titles
 │   ├── transcript.ts       # entry formatting, title extraction
 │   ├── prompt.ts           # builds the agent prompt from a transcript
@@ -29,9 +30,9 @@ agent-roundtable/
 ## Storage
 
 - Directory: `~/dev/tmp` (overridable via `ASK_HOME` for tests only).
-- Discussions: `N.md`. Next id = `max(existing N) + 1`.
+- Discussions: `N.md`, where only regular files with canonical names count (`2.md`, not `002.md`, `0.md` or a directory). Next id = `max(existing N) + 1`; on a name collision (`EEXIST`) creation moves on to the next id.
 - `.active`: contains only the active id.
-- Writes use `fs.appendFile` for entries; `.active` is written via temp file + rename.
+- Writes use `fs.appendFile` for entries; `.active` is written via a unique temp file + rename, and must contain only a canonical id.
 
 ### Discussion file format
 
@@ -40,26 +41,27 @@ Plain Markdown. Each entry starts with an HTML comment marker so the file stays 
 ```markdown
 # Should we introduce Qdrant?
 
-<!-- ask:entry author=user at=2026-11-20T21:40:00Z -->
+<!-- ask:entry author="user" at="2026-11-20T21:40:00.000Z" -->
 
 ### user
 
 Should we introduce Qdrant?
 
-<!-- ask:entry author=codex at=2026-11-20T21:41:12Z cwd=/Users/stef/dev/foo -->
+<!-- ask:entry author="codex" at="2026-11-20T21:41:12.000Z" cwd="/Users/stef/dev/foo" -->
 
 ### codex
 
 ...
 
-<!-- ask:entry author=user to=claude at=2026-11-20T21:45:03Z -->
+<!-- ask:entry author="user" to="claude" at="2026-11-20T21:45:03.000Z" -->
 
 ### user → claude
 
 What if we only use it for file discovery?
 ```
 
-- The title is the first `# ` line (used by `ask list`).
+- The title is the first `# ` line (first line of the question; used by `ask list`).
+- Marker attribute values are JSON-quoted, with `>` escaped, so paths with spaces or `-->` can't break the comment.
 - Agent entries record `cwd`, because what an agent saw depends on where `ask` was run.
 - Entry bodies are stored verbatim, except that any line starting with `<!-- ask:` is rewritten to `<!-- ask-quoted:` before appending. This stops a model (or pasted text) from forging an entry marker, e.g. a fake `author=user` entry. Entry markers are only ever written by `transcript.ts`.
 
