@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -56,6 +56,18 @@ describe("store", () => {
     await mkdir(join(store.storageDir(), "3.md"));
     assert.deepEqual(await store.listIds(), [1]);
     assert.deepEqual(await store.list(), [{ id: 1, title: "a" }]);
+  });
+
+  test("read() agrees with listIds(): symlinks and directories are not discussions", async () => {
+    await writeFile(join(dir, "elsewhere.md"), "# outside\n");
+    await store.createDiscussion("a"); // creates the storage dir
+    await symlink(join(dir, "elsewhere.md"), join(store.storageDir(), "2.md"));
+    await mkdir(join(store.storageDir(), "3.md"));
+
+    assert.deepEqual(await store.listIds(), [1]);
+    for (const id of [2, 3]) {
+      await assert.rejects(store.read(id), { name: "AskError", message: `Discussion ${id} does not exist.` });
+    }
   });
 
   test("creation skips ids whose path is taken by something else", async () => {

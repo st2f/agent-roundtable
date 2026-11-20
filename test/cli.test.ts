@@ -1,0 +1,167 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, test } from "node:test";
+import { promisify } from "node:util";
+import { main } from "../src/cli.ts";
+import * as store from "../src/store.ts";
+import { parse } from "../src/transcript.ts";
+
+let dir: string;
+
+beforeEach(async () => {
+  dir = await mkdtemp(join(tmpdir(), "ask-cli-test-"));
+  process.env.ASK_HOME = dir;
+});
+
+afterEach(async () => {
+  delete process.env.ASK_HOME;
+  await rm(dir, { recursive: true, force: true });
+});
+
+/** Runs `ask ...args` in-process, capturing output. */
+async function ask(...args: string[]): Promise<{ code: number; out: string; err: string }> {
+  let out = "";
+  let err = "";
+  const code = await main(args, { out: (t) => (out += t), err: (t) => (err += t) });
+  return { code, out, err };
+}
+
+describe("cli", () => {
+  test("new creates and activates a discussion; unquoted words are joined", async () => {
+    assert.deepEqual(await ask("new", "Should we introduce Qdrant?"), {
+      code: 0,
+      out: "Started discussion 1: Should we introduce Qdrant?\n",
+      err: "",
+    });
+    const r = await ask("new", "Second", "question");
+    assert.equal(r.out, "Started discussion 2: Second question\n");
+    assert.equal(await store.getActive(), 2);
+  });
+
+  test("add appends a user entry to the active discussion only", async () => {
+    await ask("new", "First");
+    await ask("new", "Second");
+    await ask("use", "1");
+    const r = await ask("add", "What if we only use it for file discovery?");
+    assert.equal(r.out, "Added to discussion 1.\n");
+
+    const first = parse(await store.read(1)).entries;
+    assert.deepEqual(
+      first.map((e) => [e.author, e.body]),
+      [
+        ["user", "First"],
+        ["user", "What if we only use it for file discovery?"],
+      ],
+    );
+    assert.equal(parse(await store.read(2)).entries.length, 1);
+  });
+
+  test("list marks the active discussion and aligns ids", async () => {
+    for (let i = 1; i <= 10; i++) await ask("new", `Q${i}`);
+    await ask("use", "3");
+    const lines = (await ask("list")).out.split("\n");
+    assert.equal(lines[0], "   1  Q1");
+    assert.equal(lines[2], "*  3  Q3");
+    assert.equal(lines[9], "  10  Q10");
+  });
+
+  test("list on an empty store explains how to start", async () => {
+    assert.match((await ask("list")).out, /No discussions yet/);
+  });
+
+  test("show prints the active or given discussion as stored", async () => {
+    await ask("new", "First");
+    await ask("new", "Second");
+    assert.equal((await ask("show")).out, await store.read(2));
+    assert.equal((await ask("show", "1")).out, await store.read(1));
+  });
+
+  test("show prints files without a trailing newline unchanged", async () => {
+    await writeFile(join(dir, "1.md"), "# hand-written, no final newline");
+    assert.equal((await ask("show", "1")).out, "# hand-written, no final newline");
+  });
+
+  test("use does not switch when the target cannot be read", { skip: process.getuid?.() === 0 }, async () => {
+    await ask("new", "First");
+    await ask("new", "Unreadable");
+    await ask("use", "1");
+    await chmod(join(dir, "2.md"), 0o000);
+    try {
+      const r = await ask("use", "2");
+      assert.equal(r.code, 1);
+      assert.equal(r.err, "ask: Discussion 2 cannot be read: permission denied.\n");
+      assert.equal(await store.getActive(), 1);
+    } finally {
+      await chmod(join(dir, "2.md"), 0o644);
+    }
+  });
+
+  test("use switches the active discussion", async () => {
+    await ask("new", "First");
+    await ask("new", "Second");
+    assert.equal((await ask("use", "1")).out, "Switched to discussion 1: First\n");
+    assert.equal(await store.getActive(), 1);
+  });
+
+  test("expected errors print one line to stderr and exit 1", async () => {
+    const cases: [string[], RegExp][] = [
+      [["add", "x"], /No active discussion/],
+      [["show"], /No active discussion/],
+      [["new"], /Missing text/],
+      [["new", "  "], /Missing text/],
+      [["use"], /Usage: ask use N/],
+      [["use", "1", "2"], /Usage: ask use N/],
+      [["use", "01"], /Invalid discussion id/],
+      [["use", "7"], /Discussion 7 does not exist/],
+      [["show", "abc"], /Invalid discussion id/],
+      [["list", "extra"], /Usage: ask list/],
+      [["frobnicate"], /Unknown command: frobnicate/],
+      [["constructor"], /Unknown command: constructor/], // no prototype lookups
+      [["codex"], /not implemented yet/],
+    ];
+    for (const [args, pattern] of cases) {
+      const r = await ask(...args);
+      assert.equal(r.code, 1, args.join(" "));
+      assert.equal(r.out, "", args.join(" "));
+      assert.match(r.err, pattern, args.join(" "));
+      assert.ok(r.err.startsWith("ask: ") && !r.err.includes("    at "), `no stack trace: ${r.err}`);
+    }
+  });
+
+  test("help goes to stdout with exit 0; no command goes to stderr with exit 1", async () => {
+    for (const flag of ["help", "-h", "--help"]) {
+      const r = await ask(flag);
+      assert.equal(r.code, 0);
+      assert.match(r.out, /^Usage: ask/);
+    }
+    const r = await ask();
+    assert.equal(r.code, 1);
+    assert.match(r.err, /^Usage: ask/);
+  });
+
+  test("unexpected errors exit 1 with details", async () => {
+    await rm(dir, { recursive: true });
+    await writeFile(dir, "not a directory"); // storage path is now a file
+    const r = await ask("new", "q");
+    assert.equal(r.code, 1);
+    assert.match(r.err, /^ask: unexpected error\n/);
+  });
+
+  test("runs as a real process with the right exit codes", async () => {
+    const run = promisify(execFile);
+    const cli = join(import.meta.dirname, "..", "src", "cli.ts");
+    const env = { ...process.env, ASK_HOME: dir };
+
+    const ok = await run(process.execPath, [cli, "new", "From a subprocess"], { env });
+    assert.equal(ok.stdout, "Started discussion 1: From a subprocess\n");
+
+    await assert.rejects(run(process.execPath, [cli, "use", "9"], { env }), (err: { code: number; stderr: string }) => {
+      assert.equal(err.code, 1);
+      assert.equal(err.stderr, "ask: Discussion 9 does not exist.\n");
+      return true;
+    });
+  });
+});

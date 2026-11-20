@@ -1,4 +1,5 @@
-import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { appendFile, mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -14,7 +15,7 @@ const ACTIVE_FILE = ".active";
 // Canonical ids only: "2.md" is discussion 2, while "002.md" or "0.md" are not discussions,
 // so a listed id always maps back to the same file via discussionPath().
 const DISCUSSION_FILE = /^([1-9]\d*)\.md$/;
-const ACTIVE_ID = /^[1-9]\d*$/;
+const CANONICAL_ID = /^[1-9]\d*$/;
 const MAX_CREATE_ATTEMPTS = 100;
 
 /** Storage directory. ASK_HOME exists only so tests can use a temp dir. */
@@ -73,12 +74,27 @@ export async function createDiscussion(question: string, at = new Date()): Promi
   return id;
 }
 
+/**
+ * Reads a discussion, applying the same rule as listIds(): only a regular file counts.
+ * O_NOFOLLOW rejects symlinks and the type check runs on the opened handle, so there is
+ * no gap between checking and reading.
+ */
 export async function read(id: number): Promise<string> {
+  const missing = new AskError(`Discussion ${id} does not exist.`);
+  let handle;
   try {
-    return await readFile(discussionPath(id), "utf8");
+    handle = await open(discussionPath(id), constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (err) {
-    if (isNotFound(err)) throw new AskError(`Discussion ${id} does not exist.`);
+    const code = errorCode(err);
+    if (code === "ENOENT" || code === "ELOOP" || code === "EISDIR") throw missing;
+    if (code === "EACCES" || code === "EPERM") throw new AskError(`Discussion ${id} cannot be read: permission denied.`);
     throw err;
+  }
+  try {
+    if (!(await handle.stat()).isFile()) throw missing;
+    return await handle.readFile("utf8");
+  } finally {
+    await handle.close();
   }
 }
 
@@ -101,11 +117,16 @@ export async function getActive(): Promise<number | null> {
     if (isNotFound(err)) return null;
     throw err;
   }
-  const value = raw.trim();
-  if (!ACTIVE_ID.test(value)) return null; // reject "1garbage", "01", "-1", ...
-  const id = Number(value);
-  if (!Number.isSafeInteger(id) || !(await exists(id))) return null;
+  const id = parseId(raw.trim());
+  if (id === null || !(await exists(id))) return null;
   return id;
+}
+
+/** Parses a canonical discussion id ("2"); null for "02", "1garbage", "-1", "1.0", ... */
+export function parseId(text: string): number | null {
+  if (!CANONICAL_ID.test(text)) return null;
+  const id = Number(text);
+  return Number.isSafeInteger(id) ? id : null;
 }
 
 /** Like getActive, but throws a helpful error when there is no active discussion. */
@@ -124,10 +145,14 @@ export async function setActive(id: number): Promise<void> {
   await rename(tmp, target);
 }
 
+function errorCode(err: unknown): string | undefined {
+  return (err as NodeJS.ErrnoException | undefined)?.code;
+}
+
 function isNotFound(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+  return errorCode(err) === "ENOENT";
 }
 
 function isAlreadyExists(err: unknown): boolean {
-  return (err as NodeJS.ErrnoException | undefined)?.code === "EEXIST";
+  return errorCode(err) === "EEXIST";
 }
