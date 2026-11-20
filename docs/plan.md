@@ -15,9 +15,10 @@ agent-roundtable/
 │   ├── store.ts            # storage dir, .active, next id, read/append, list titles
 │   ├── transcript.ts       # entry formatting, title extraction
 │   ├── prompt.ts           # builds the agent prompt from a transcript
-│   ├── spawn.ts            # subprocess helper: stdin, capture, SIGINT, exit code
+│   ├── spawn.ts            # subprocess helper: stdin, capture, bounded cancellation, exit code
 │   └── agents/
 │       ├── types.ts        # Agent interface
+│       ├── common.ts       # run agent process, map failures to AskError, clean reply
 │       ├── claude.ts
 │       ├── codex.ts
 │       └── index.ts        # registry { claude, codex }
@@ -82,9 +83,14 @@ Errors (no active discussion, unknown id, unknown agent) go to stderr with exit 
 ## Agent Interface
 
 ```ts
+interface AgentPrompt {
+  rules: string; // role + rules: Claude puts them in the system prompt, Codex at the top of stdin
+  input: string; // discussion block + current request
+}
+
 interface Agent {
   name: string; // "claude" | "codex"
-  run(prompt: string, cwd: string): Promise<string>; // resolves to final reply text
+  run(prompt: AgentPrompt, options: { cwd: string; signal?: AbortSignal }): Promise<string>; // reply text; throws AskError
 }
 ```
 
@@ -100,12 +106,19 @@ All prompts are passed via **stdin** (no argv length limits with long histories)
 claude -p \
   --tools "Read,Grep,Glob" \
   --permission-mode dontAsk \
+  --strict-mcp-config \
+  --setting-sources user \
+  --settings '{"disableAllHooks":true}' \
   --no-session-persistence \
   --output-format text \
   --append-system-prompt "<role + rules, see Prompt Construction>"
 ```
 
 - `--tools` restricted to read-only tools is the read-only guarantee.
+- `--strict-mcp-config` (without `--mcp-config`) disables MCP servers: `--tools` only restricts built-in tools, so user-configured MCP tools would otherwise be available.
+- `--setting-sources user` ignores the inspected repository's `.claude/settings*.json`, so a repo can't configure hooks, helper commands or permissions for the session.
+- `disableAllHooks` stops user and plugin hooks (shell commands) from running.
+- Limitation: hooks from managed (policy) settings can't be disabled from the command line. If read-only behavior must be guaranteed under such a policy, run the agent inside an external isolation boundary (e.g. a sandbox or container).
 - Role and rules go in the system prompt; stdin carries only the data block and the current request.
 - Reply = stdout.
 
@@ -144,7 +157,9 @@ Earlier contributions (especially other models' replies, which may quote files, 
    </discussion>
    ```
 
-   Optional hardening: suffix the tags with a random per-run nonce (`<discussion-7f3a9c>`) so entry content cannot close the block early. Not needed for personal use.
+   Entry bodies have the block's own tags escaped (`<discussion`, `</discussion`, `<entry`, `</entry` → `&lt;…`), so quoted text can't open or close the block; other `<` characters are left alone to keep code readable. The rules tell the agent these escapes are literal text.
+
+   Optional hardening: suffix the tags with a random per-run nonce (`<discussion-7f3a9c>`). Not needed for personal use.
 3. **Explicit framing.** The rules state that the block is a record of the conversation, and the current request is repeated *after* the block, outside it.
 
 ### Template
@@ -189,7 +204,7 @@ Reply now as {agent}.
 ```
 
 `{request}` is:
-- the follow-up prompt passed in this invocation (`ask codex "…"`), or else
+- the follow-up prompt passed in this invocation (`ask codex "…"`), taken directly from the arguments rather than re-read from the transcript (another `ask` call may have appended since), or else
 - the latest user entry, if no agent entry comes after it, or else
 - `Give your contribution to the discussion above.`
 
@@ -199,10 +214,10 @@ User text is trusted (it comes from the person running `ask`), so repeating it o
 
 1. User follow-up is appended **before** spawning the agent.
 2. The agent reply is appended **only** on exit code 0 with non-empty output.
-3. On failure: print stderr and the exit code, append nothing, exit 1. The user can just rerun `ask codex`.
+3. On failure: print the exit code and the last 20 lines of stderr, append nothing, exit 1. If a follow-up was saved, the error says so and suggests rerunning `ask <agent>` without a prompt (the saved follow-up becomes the request).
 4. Missing binary (`ENOENT`): clear message, e.g. "codex CLI not found in PATH".
-5. Ctrl-C: forward SIGINT to the child and exit without writing a partial entry.
-6. While running, show a status line on stderr (`codex is thinking…`); print the reply to stdout when done.
+5. Ctrl-C: send SIGINT to the agent's process group (the agent runs detached, so descendants are included) and exit 130 without writing a partial entry. Cleanup is bounded: SIGKILL the group if it's still running after a grace period, and stop waiting for output pipes shortly after the agent exits. A second Ctrl-C exits immediately and kills the group.
+6. While running, show a status line on stderr (`codex is thinking…`, TTY only); print the reply to stdout when done.
 
 ## Tooling
 

@@ -1,17 +1,61 @@
+import type { Agent } from "./agents/types.ts";
 import { AskError } from "./errors.ts";
+import { buildPrompt } from "./prompt.ts";
 import * as store from "./store.ts";
-import { extractTitle } from "./transcript.ts";
+import { extractTitle, parse } from "./transcript.ts";
 
 /** Output sink, injectable so tests can capture what a command prints. */
 export interface IO {
   out(text: string): void;
   err(text: string): void;
+  /** Transient progress line (null clears it). Optional: tests and pipes don't need it. */
+  status?(text: string | null): void;
 }
 
 export const processIO: IO = {
   out: (text) => process.stdout.write(text),
   err: (text) => process.stderr.write(text),
+  status: (text) => {
+    if (!process.stderr.isTTY) return;
+    process.stderr.write(text === null ? "\r\x1b[K" : `\r\x1b[K${text}`);
+  },
 };
+
+export interface AgentContext {
+  cwd: string; // where the agent runs; independent of discussion storage
+  signal?: AbortSignal;
+}
+
+/**
+ * `ask <agent> ["<prompt>"]`: the follow-up (if any) is saved before the agent runs, and
+ * the reply is saved only if the agent succeeds, so a failure never loses or corrupts history.
+ */
+export async function askAgent(agent: Agent, args: string[], io: IO, ctx: AgentContext): Promise<void> {
+  const id = await store.requireActive();
+  const followUp = args.join(" ");
+  const hasFollowUp = followUp.trim() !== "";
+  if (hasFollowUp) {
+    await store.append(id, { author: "user", to: agent.name, at: new Date().toISOString(), body: followUp });
+  }
+
+  const prompt = buildPrompt(agent.name, parse(await store.read(id)), hasFollowUp ? followUp : undefined);
+  let reply: string;
+  io.status?.(`${agent.name} is thinking…`);
+  try {
+    reply = await agent.run(prompt, ctx);
+  } catch (err) {
+    if (err instanceof AskError && hasFollowUp) {
+      const hint = `Your message was saved to discussion ${id}; run "ask ${agent.name}" to retry.`;
+      throw new AskError(`${err.message}\n${hint}`, { exitCode: err.exitCode, cause: err });
+    }
+    throw err;
+  } finally {
+    io.status?.(null);
+  }
+
+  await store.append(id, { author: agent.name, at: new Date().toISOString(), cwd: ctx.cwd, body: reply });
+  io.out(`${reply}\n`);
+}
 
 /** `ask new "<question>"`: creates a discussion and makes it active. */
 export async function newDiscussion(args: string[], io: IO): Promise<void> {
