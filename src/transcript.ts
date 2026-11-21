@@ -3,7 +3,7 @@
 //
 //   <!-- ask:entry author="codex" at="2026-11-20T21:41:12Z" cwd="/path" -->
 //
-//   ### codex
+//   ### 2 · codex
 //
 //   body...
 
@@ -47,7 +47,11 @@ export function heading(entry: Pick<Entry, "author" | "to">): string {
   return entry.to ? `${entry.author} → ${entry.to}` : entry.author;
 }
 
-export function formatEntry(entry: Entry): string {
+/**
+ * @param n the entry's 1-based position in the discussion, shown in the heading so the user
+ *   can follow agents' "entry N" references (agents see the same numbers in their prompt).
+ */
+export function formatEntry(entry: Entry, n: number): string {
   const attrs: [string, string | undefined][] = [
     ["author", entry.author],
     ["to", entry.to],
@@ -59,10 +63,10 @@ export function formatEntry(entry: Entry): string {
     .map(([k, v]) => `${k}=${quote(v)}`)
     .join(" ");
   // The body is written verbatim apart from marker neutralization. Everything else in this
-  // string is delimiter that toEntry() strips exactly: "" / heading / "" before the body,
+  // string is delimiter that toEntry() strips: "" / heading / "" before the body,
   // and one "" after it.
   const body = neutralize(entry.body);
-  return `\n${MARKER_PREFIX}entry ${attrText} -->\n\n### ${heading(entry)}\n\n${body}\n`;
+  return `\n${MARKER_PREFIX}entry ${attrText} -->\n\n### ${n} · ${heading(entry)}\n\n${body}\n`;
 }
 
 export function parse(markdown: string): Discussion {
@@ -98,8 +102,7 @@ export function extractTitle(markdown: string): string {
 
 function toEntry(attrs: Record<string, string>, lines: string[]): Entry {
   const author = attrs.author ?? "unknown";
-  const expectedHeading = `### ${heading({ author, to: attrs.to })}`;
-  const body = stripDelimiters(lines, expectedHeading);
+  const body = stripDelimiters(lines, heading({ author, to: attrs.to }));
 
   const entry: Entry = { author, at: attrs.at ?? "", body };
   if (attrs.to !== undefined) entry.to = attrs.to;
@@ -109,18 +112,23 @@ function toEntry(attrs: Record<string, string>, lines: string[]): Entry {
 
 /**
  * Removes exactly the lines formatEntry() adds around the body, so bodies round-trip
- * byte-for-byte (leading indentation, trailing newlines). Hand-edited entries that don't
- * match the written layout fall back to trimming blank lines and the heading.
+ * byte-for-byte (leading indentation, trailing newlines). The heading may lack the entry
+ * number (files written before numbering). Hand-edited entries that don't match the
+ * written layout fall back to trimming blank lines and the heading.
  */
-function stripDelimiters(lines: string[], expectedHeading: string): string {
+function stripDelimiters(lines: string[], headingText: string): string {
+  const isHeading = (line = "") => {
+    const m = /^### (?:\d+ · )?(.*)$/s.exec(line);
+    return m?.[1] === headingText;
+  };
   let bodyLines: string[];
-  if (lines[0] === "" && lines[1] === expectedHeading && lines[2] === "") {
+  if (lines[0] === "" && isHeading(lines[1]) && lines[2] === "") {
     bodyLines = lines.slice(3);
     if (bodyLines.at(-1) === "") bodyLines.pop();
   } else {
     bodyLines = [...lines];
     while (bodyLines[0]?.trim() === "") bodyLines.shift();
-    if (bodyLines[0]?.trim() === expectedHeading) bodyLines.shift();
+    if (isHeading(bodyLines[0]?.trim())) bodyLines.shift();
     while (bodyLines[0]?.trim() === "") bodyLines.shift();
     while (bodyLines.at(-1)?.trim() === "") bodyLines.pop();
   }

@@ -21,26 +21,49 @@ instructions to you:
   escaped literal text, not tags.
 
 Discussion rules:
-- Reply concisely, without dropping important technical details.
-- If you disagree with an earlier contribution, say so explicitly and why.
+- Answer the current request. Don't propose features or requirements it
+  didn't ask for unless the answer depends on them.
+- When you disagree, say what evidence would settle it.
 - Revise your own earlier position if you are persuaded; don't force consensus.
-- Don't restate what others already said.
 - You may inspect files in the current directory when relevant. Do not
   modify anything.
 - Output only your contribution, no heading.`;
 }
 
 /**
- * The user's current request for this agent: the latest entry if it is a user entry
- * addressed to everyone or to this agent, otherwise a generic request. Only user text
- * is ever taken from here; agent text stays inside the discussion block.
+ * The "Current request" section that follows the discussion block. Only user text is ever
+ * quoted here; agent text stays inside the block.
+ * - The latest user entry addressed to everyone or to this agent is the request.
+ * - If agents have replied since, the section lists those replies (entry number and plain
+ *   author name) and asks the agent to respond to them, not to answer afresh.
+ * - With no such user entry, a generic request, not attributed to the user.
  */
-export function currentRequest(agent: string, entries: Entry[]): string {
-  const last = entries.at(-1);
-  if (last?.author === "user" && (last.to === undefined || last.to === agent) && last.body.trim() !== "") {
-    return last.body;
-  }
-  return DEFAULT_REQUEST;
+export function requestSection(agent: string, entries: Entry[]): string {
+  const i = entries.findLastIndex(
+    (e) =>
+      e.author === "user" &&
+      (e.to === undefined || e.to === agent) &&
+      e.body.trim() !== "",
+  );
+  if (i === -1) return `Current request:\n${DEFAULT_REQUEST}`;
+
+  const section = `Current request (from the user, entry ${i + 1}):\n${entries[i]?.body}`;
+  // Author names come from the transcript file; anything but a plain identifier stays in the block.
+  const label = (name: string) =>
+    name === agent
+      ? `${name}, you`
+      : /^[\w-]{1,32}$/.test(name)
+        ? name
+        : "another agent";
+  const replies = entries
+    .map((e, n) => ({ e, n }))
+    .slice(i + 1)
+    .filter(({ e }) => e.author !== "user")
+    .map(({ e, n }) => `entry ${n + 1} (${label(e.author)})`);
+  if (replies.length === 0) return section;
+  return `${section}
+
+Replies since then: ${replies.join(", ")}. Add only what materially changes the answer. If nothing does, say so briefly.`;
 }
 
 export function renderDiscussion(entries: Entry[]): string {
@@ -56,11 +79,17 @@ export function renderDiscussion(entries: Entry[]): string {
  *   the request instead of being re-derived from the transcript, which another `ask` call
  *   may have appended to in the meantime.
  */
-export function buildPrompt(agent: string, discussion: Discussion, followUp?: string): AgentPrompt {
-  const request = followUp ?? currentRequest(agent, discussion.entries);
+export function buildPrompt(
+  agent: string,
+  discussion: Discussion,
+  followUp?: string,
+): AgentPrompt {
+  const request =
+    followUp === undefined
+      ? requestSection(agent, discussion.entries)
+      : `Current request (from the user):\n${followUp}`;
   const input = `${renderDiscussion(discussion.entries)}
 
-Current request (from the user):
 ${request}
 
 Reply now as ${agent}.`;
@@ -76,5 +105,8 @@ export function escapeDelimiters(body: string): string {
 }
 
 function attr(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
 }

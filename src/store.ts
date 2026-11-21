@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AskError } from "./errors.ts";
-import { type Entry, extractTitle, formatEntry, formatHeader } from "./transcript.ts";
+import { type Entry, extractTitle, formatEntry, formatHeader, parse } from "./transcript.ts";
 
 export interface DiscussionSummary {
   id: number;
@@ -60,7 +60,7 @@ export async function createDiscussion(question: string, at = new Date()): Promi
   if (question.trim() === "") throw new AskError("The question cannot be empty.");
   await ensureDir();
 
-  const content = formatHeader(question) + formatEntry({ author: "user", at: at.toISOString(), body: question });
+  const content = formatHeader(question) + formatEntry({ author: "user", at: at.toISOString(), body: question }, 1);
   let id = ((await listIds()).at(-1) ?? 0) + 1;
   // "wx" fails if the path already exists, so a concurrent `ask new` (or a non-discussion
   // entry such as a directory named "3.md") is never overwritten; take the next id instead.
@@ -101,13 +101,17 @@ export async function read(id: number): Promise<string> {
 }
 
 /**
- * Appends one entry. Large appends are written in several chunks, so concurrent writers
+ * Appends one entry, numbered after the existing ones. Large appends are written in several chunks, so concurrent writers
  * (other `ask` processes, or concurrent calls here) are serialized with a per-discussion
  * lock file; otherwise another entry could land in the middle of this one.
  */
 export async function append(id: number, entry: Entry): Promise<void> {
   if (!(await exists(id))) throw new AskError(`Discussion ${id} does not exist.`);
-  await withLock(id, () => appendFile(discussionPath(id), formatEntry(entry)));
+  await withLock(id, async () => {
+    // Counted under the lock, so concurrent appends can't get the same number.
+    const n = parse(await read(id)).entries.length + 1;
+    await appendFile(discussionPath(id), formatEntry(entry, n));
+  });
 }
 
 /**

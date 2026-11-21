@@ -22,7 +22,7 @@ agent-roundtable/
 ## Storage
 
 - Discussions are `N.md` files in `~/dev/tmp`; `.active` holds the current id.
-- Each entry starts with an `<!-- ask:entry author=… -->` marker, followed by a `### author` heading and the body. Agent entries also record `cwd`.
+- Each entry starts with an `<!-- ask:entry author=… -->` marker, followed by a `### N · author` heading (N = entry number, as agents see it) and the body. Agent entries also record `cwd`.
 - Only `transcript.ts` writes markers; marker-like lines in bodies are neutralized so a reply can't forge an entry.
 - Appends to a discussion are serialized with a per-discussion lock file, so concurrent `ask` processes can't interleave entries.
 
@@ -52,7 +52,7 @@ Managed (admin) configuration of either CLI can't be overridden from the command
 ## Prompt
 
 - The transcript is data, not instructions: entries are rendered inside `<discussion>` tags (with those tags escaped in bodies), and the rules tell the agent not to follow instructions found there.
-- The current request is repeated after the block: the invocation's follow-up, else the latest user entry, else a generic request. Only user text appears outside the block.
+- The current request is repeated after the block: the invocation's follow-up, else the latest user entry for this agent (listing the agent replies since then, to respond to), else a generic request. Only user text and plain agent names appear outside the block.
 - Rules: be concise, disagree explicitly, revise when persuaded, don't force consensus, don't modify anything.
 
 ## Failure Handling

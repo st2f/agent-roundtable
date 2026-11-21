@@ -86,6 +86,8 @@ describe("store", () => {
     const entries = parse(await store.read(1)).entries.slice(1);
     assert.equal(entries.length, 3);
     for (const e of entries) assert.ok(bodies.includes(e.body), `${e.author} body intact`);
+    const numbers = [...(await store.read(1)).matchAll(/^### (\d+) · /gm)].map((m) => m[1]);
+    assert.deepEqual(numbers, ["1", "2", "3", "4"]); // each concurrent append got its own number
     assert.deepEqual((await readdir(store.storageDir())).filter((n) => n.endsWith(".lock")), []);
   });
 
@@ -105,7 +107,9 @@ describe("store", () => {
 
   test("a lock left by a dead process is taken over", async () => {
     await store.createDiscussion("q");
-    const dead = execFileSync(process.execPath, ["-p", "process.pid"]).toString().trim(); // exited already
+    // Above the max PID on macOS (99998) and Linux (2^22), so no process can hold it. A
+    // just-exited process's PID would be flaky: the OS may reuse it for a live process.
+    const dead = 99_999_999;
     await writeFile(join(store.storageDir(), "1.md.lock"), `${dead}\n`);
     await store.append(1, { author: "user", at: "t", body: "after stale lock" });
     assert.equal(parse(await store.read(1)).entries.at(-1)?.body, "after stale lock");
@@ -146,8 +150,13 @@ describe("store", () => {
     await store.append(id, { author: "codex", at: "t1", cwd: "/x", body: "reply" });
     await store.append(id, { author: "user", to: "claude", at: "t2", body: "follow-up" });
 
-    const authors = parse(await store.read(id)).entries.map((e) => e.author);
-    assert.deepEqual(authors, ["user", "codex", "user"]);
+    const md = await store.read(id);
+    assert.deepEqual(
+      parse(md).entries.map((e) => e.author),
+      ["user", "codex", "user"],
+    );
+    // Headings carry the entry numbers agents see in their prompt.
+    assert.deepEqual(md.match(/^### .*$/gm), ["### 1 · user", "### 2 · codex", "### 3 · user → claude"]);
   });
 
   test("use switches the active discussion; unknown ids are rejected", async () => {

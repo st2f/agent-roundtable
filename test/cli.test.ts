@@ -175,7 +175,7 @@ describe("cli", () => {
 
     assert.equal(calls.length, 1);
     assert.equal(calls[0]?.options.cwd, process.cwd());
-    assert.match(calls[0]?.prompt.input ?? "", /Current request \(from the user\):\nShould we introduce Qdrant\?/);
+    assert.match(calls[0]?.prompt.input ?? "", /Current request \(from the user, entry 1\):\nShould we introduce Qdrant\?/);
 
     const entries = parse(await store.read(1)).entries;
     assert.deepEqual(entries.at(-1), {
@@ -225,7 +225,7 @@ describe("cli", () => {
     await ask("claude");
     const input = calls[0]?.prompt.input ?? "";
     assert.match(input, /<entry n="2" author="codex">\nCodex says no\.\n<\/entry>/);
-    assert.match(input, /Give your contribution to the discussion above\./);
+    assert.match(input, /Current request \(from the user, entry 1\):\nQ\?\n\nReplies since then: entry 2 \(codex\)\./);
   });
 
   test("agent failure keeps history intact: follow-up saved, no reply, retry hint", async () => {
@@ -249,7 +249,7 @@ describe("cli", () => {
     // Retrying without a prompt picks the saved follow-up up as the request.
     useFakeClaude(() => "ok now");
     assert.equal((await ask("claude")).code, 0);
-    assert.match(calls.at(-1)?.prompt.input ?? "", /Current request \(from the user\):\nFollow-up\n/);
+    assert.match(calls.at(-1)?.prompt.input ?? "", /Current request \(from the user, entry 2\):\nFollow-up\n/);
   });
 
   test("retry hint names the discussion even if the active one changed during the run", async () => {
