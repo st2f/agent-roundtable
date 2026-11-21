@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { promisify } from "node:util";
 import { AskError } from "../src/errors.ts";
 import * as store from "../src/store.ts";
 import { parse } from "../src/transcript.ts";
@@ -68,6 +70,45 @@ describe("store", () => {
     for (const id of [2, 3]) {
       await assert.rejects(store.read(id), { name: "AskError", message: `Discussion ${id} does not exist.` });
     }
+  });
+
+  test("read() rejects a FIFO without blocking", async () => {
+    await store.createDiscussion("a");
+    execFileSync("mkfifo", [join(store.storageDir(), "2.md")]);
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("read() blocked")), 2000).unref());
+    await assert.rejects(Promise.race([store.read(2), timeout]), { name: "AskError", message: "Discussion 2 does not exist." });
+  });
+
+  test("concurrent large appends stay intact", async () => {
+    await store.createDiscussion("q");
+    const bodies = ["a", "b", "c"].map((ch) => ch.repeat(2 * 1024 * 1024));
+    await Promise.all(bodies.map((body, i) => store.append(1, { author: `agent${i}`, at: "t", body })));
+    const entries = parse(await store.read(1)).entries.slice(1);
+    assert.equal(entries.length, 3);
+    for (const e of entries) assert.ok(bodies.includes(e.body), `${e.author} body intact`);
+    assert.deepEqual((await readdir(store.storageDir())).filter((n) => n.endsWith(".lock")), []);
+  });
+
+  test("large appends from separate processes stay intact", async () => {
+    await store.createDiscussion("q");
+    const storeModule = join(import.meta.dirname, "..", "src", "store.ts");
+    const script = (ch: string) => `
+      const store = await import(${JSON.stringify(storeModule)});
+      await store.append(1, { author: "proc-${ch}", at: "t", body: "${ch}".repeat(2 * 1024 * 1024) });
+    `;
+    const run = promisify(execFile);
+    await Promise.all(["x", "y", "z"].map((ch) => run(process.execPath, ["--input-type=module", "-e", script(ch)], { env: process.env })));
+    const entries = parse(await store.read(1)).entries.slice(1);
+    assert.deepEqual(entries.map((e) => e.author).sort(), ["proc-x", "proc-y", "proc-z"]);
+    for (const e of entries) assert.equal(e.body, e.author.slice(-1).repeat(2 * 1024 * 1024));
+  });
+
+  test("a lock left by a dead process is taken over", async () => {
+    await store.createDiscussion("q");
+    const dead = execFileSync(process.execPath, ["-p", "process.pid"]).toString().trim(); // exited already
+    await writeFile(join(store.storageDir(), "1.md.lock"), `${dead}\n`);
+    await store.append(1, { author: "user", at: "t", body: "after stale lock" });
+    assert.equal(parse(await store.read(1)).entries.at(-1)?.body, "after stale lock");
   });
 
   test("creation skips ids whose path is taken by something else", async () => {

@@ -45,7 +45,8 @@ export async function askAgent(agent: Agent, args: string[], io: IO, ctx: AgentC
     reply = await agent.run(prompt, ctx);
   } catch (err) {
     if (err instanceof AskError && hasFollowUp) {
-      const hint = `Your message was saved to discussion ${id}; run "ask ${agent.name}" to retry.`;
+      // Name the discussion explicitly: the active one may have changed while the agent ran.
+      const hint = `Your message was saved to discussion ${id}; to retry, run: ask use ${id} && ask ${agent.name}`;
       throw new AskError(`${err.message}\n${hint}`, { exitCode: err.exitCode, cause: err });
     }
     throw err;

@@ -1,3 +1,7 @@
+import { rmSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AskError } from "../errors.ts";
 import { type RunOptions, type RunResult, runProcess } from "../spawn.ts";
 
@@ -28,6 +32,23 @@ export function cleanReply(name: string, text: string): string {
   const reply = text.replace(/\s+$/, "");
   if (reply.trim() === "") throw new AskError(`${name} returned an empty reply.`);
   return reply;
+}
+
+/**
+ * Runs fn with a fresh private temp dir and always removes it: normally via finally, and
+ * also if the process exits mid-run (a second Ctrl-C calls process.exit, which skips
+ * pending finally blocks but still runs synchronous "exit" listeners).
+ */
+export async function withTempDir<T>(prefix: string, fn: (dir: string) => Promise<T>): Promise<T> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  const removeOnExit = () => rmSync(dir, { recursive: true, force: true });
+  process.on("exit", removeOnExit);
+  try {
+    return await fn(dir);
+  } finally {
+    process.off("exit", removeOnExit);
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
 function tail(output: string): string {

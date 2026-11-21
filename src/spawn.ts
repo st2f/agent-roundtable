@@ -5,6 +5,7 @@ export interface RunOptions {
   args: string[];
   input: string; // written to stdin, then stdin is closed
   cwd: string;
+  env?: NodeJS.ProcessEnv; // defaults to this process's environment
   signal?: AbortSignal; // on abort, the child's process group receives SIGINT
   killGraceMs?: number; // after abort, SIGKILL the group if it's still running after this long
   closeGraceMs?: number; // after the child exits, wait at most this long for its pipes to close
@@ -33,12 +34,12 @@ const CLOSE_GRACE_MS = 1000;
  * - If this process exits first (e.g. a second Ctrl-C), the group is killed, not orphaned.
  */
 export function runProcess(options: RunOptions): Promise<RunResult> {
-  const { command, args, input, cwd, signal } = options;
+  const { command, args, input, cwd, env, signal } = options;
   const killGraceMs = options.killGraceMs ?? KILL_GRACE_MS;
   const closeGraceMs = options.closeGraceMs ?? CLOSE_GRACE_MS;
 
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, stdio: ["pipe", "pipe", "pipe"], detached: true });
+    const child = spawn(command, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"], detached: true });
 
     let stdout = "";
     let stderr = "";

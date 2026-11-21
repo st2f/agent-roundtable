@@ -1,5 +1,5 @@
-import { constants } from "node:fs";
-import { appendFile, mkdir, open, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { constants, rmSync } from "node:fs";
+import { appendFile, mkdir, open, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +17,8 @@ const ACTIVE_FILE = ".active";
 const DISCUSSION_FILE = /^([1-9]\d*)\.md$/;
 const CANONICAL_ID = /^[1-9]\d*$/;
 const MAX_CREATE_ATTEMPTS = 100;
+const LOCK_TIMEOUT_MS = 10_000;
+const LOCK_RETRY_MS = 25;
 
 /** Storage directory. ASK_HOME exists only so tests can use a temp dir. */
 export function storageDir(): string {
@@ -76,14 +78,14 @@ export async function createDiscussion(question: string, at = new Date()): Promi
 
 /**
  * Reads a discussion, applying the same rule as listIds(): only a regular file counts.
- * O_NOFOLLOW rejects symlinks and the type check runs on the opened handle, so there is
- * no gap between checking and reading.
+ * O_NOFOLLOW rejects symlinks, O_NONBLOCK keeps open() from blocking on a FIFO, and the
+ * type check runs on the opened handle, so there is no gap between checking and reading.
  */
 export async function read(id: number): Promise<string> {
   const missing = new AskError(`Discussion ${id} does not exist.`);
   let handle;
   try {
-    handle = await open(discussionPath(id), constants.O_RDONLY | constants.O_NOFOLLOW);
+    handle = await open(discussionPath(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (err) {
     const code = errorCode(err);
     if (code === "ENOENT" || code === "ELOOP" || code === "EISDIR") throw missing;
@@ -98,9 +100,69 @@ export async function read(id: number): Promise<string> {
   }
 }
 
+/**
+ * Appends one entry. Large appends are written in several chunks, so concurrent writers
+ * (other `ask` processes, or concurrent calls here) are serialized with a per-discussion
+ * lock file; otherwise another entry could land in the middle of this one.
+ */
 export async function append(id: number, entry: Entry): Promise<void> {
   if (!(await exists(id))) throw new AskError(`Discussion ${id} does not exist.`);
-  await appendFile(discussionPath(id), formatEntry(entry));
+  await withLock(id, () => appendFile(discussionPath(id), formatEntry(entry)));
+}
+
+/**
+ * Cross-process mutex: "N.md.lock" is created exclusively and holds the owner's pid.
+ * A lock whose owner no longer runs is stale and taken over; the lock is also removed
+ * synchronously if this process exits mid-append (e.g. a second Ctrl-C).
+ */
+async function withLock<T>(id: number, fn: () => Promise<T>): Promise<T> {
+  const lockPath = `${discussionPath(id)}.lock`;
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;;) {
+    try {
+      await writeFile(lockPath, `${process.pid}\n`, { flag: "wx" });
+      break;
+    } catch (err) {
+      if (!isAlreadyExists(err)) throw err;
+    }
+    const state = await lockState(lockPath);
+    if (state === "released") continue;
+    if (state === "stale") {
+      await rm(lockPath, { force: true });
+      continue;
+    }
+    if (Date.now() > deadline) {
+      throw new AskError(`Discussion ${id} is locked by another ask process. If none is running, delete ${lockPath}.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_MS));
+  }
+
+  const removeOnExit = () => rmSync(lockPath, { force: true });
+  process.on("exit", removeOnExit);
+  try {
+    return await fn();
+  } finally {
+    process.off("exit", removeOnExit);
+    await rm(lockPath, { force: true });
+  }
+}
+
+/** "released": gone meanwhile; "stale": owner no longer runs; "held": wait. */
+async function lockState(lockPath: string): Promise<"released" | "stale" | "held"> {
+  let pid: number;
+  try {
+    pid = Number.parseInt(await readFile(lockPath, "utf8"), 10);
+  } catch (err) {
+    if (isNotFound(err)) return "released";
+    throw err;
+  }
+  if (!Number.isSafeInteger(pid) || pid <= 0) return "held"; // pid not written yet
+  try {
+    process.kill(pid, 0);
+    return "held";
+  } catch (err) {
+    return errorCode(err) === "ESRCH" ? "stale" : "held";
+  }
 }
 
 export async function list(): Promise<DiscussionSummary[]> {

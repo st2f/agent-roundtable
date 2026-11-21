@@ -7,7 +7,6 @@ import { storageDir } from "./store.ts";
 type Command = (args: string[], io: IO) => Promise<void>;
 
 const COMMANDS: Record<string, Command> = { new: newDiscussion, add, list, show, use };
-const PLANNED_AGENTS = ["codex"]; // listed in usage, adapter not written yet
 const HELP_FLAGS = ["help", "-h", "--help"];
 
 function usage(): string {
@@ -50,7 +49,6 @@ export async function main(
       await withInterrupt((signal) => askAgent(agent, args, io, { cwd: process.cwd(), signal }));
       return 0;
     }
-    if (PLANNED_AGENTS.includes(command)) throw new AskError(`"${command}" is not implemented yet.`);
     const run = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : undefined;
     if (!run) throw new AskError(`Unknown command: ${command}. Run "ask help" for usage.`);
     await run(args, io);

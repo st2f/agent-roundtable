@@ -139,7 +139,6 @@ describe("cli", () => {
       [["list", "extra"], /Usage: ask list/],
       [["frobnicate"], /Unknown command: frobnicate/],
       [["constructor"], /Unknown command: constructor/], // no prototype lookups
-      [["codex"], /not implemented yet/],
     ];
     for (const [args, pattern] of cases) {
       const r = await ask(...args);
@@ -239,7 +238,7 @@ describe("cli", () => {
     assert.equal(r.out, "");
     assert.equal(
       r.err,
-      'ask: claude failed (exit code 2).\nYour message was saved to discussion 1; run "ask claude" to retry.\n',
+      "ask: claude failed (exit code 2).\nYour message was saved to discussion 1; to retry, run: ask use 1 && ask claude\n",
     );
     const entries = parse(await store.read(1)).entries;
     assert.deepEqual(
@@ -251,6 +250,19 @@ describe("cli", () => {
     useFakeClaude(() => "ok now");
     assert.equal((await ask("claude")).code, 0);
     assert.match(calls.at(-1)?.prompt.input ?? "", /Current request \(from the user\):\nFollow-up\n/);
+  });
+
+  test("retry hint names the discussion even if the active one changed during the run", async () => {
+    await ask("new", "First");
+    await ask("new", "Second");
+    await ask("use", "1");
+    useFakeClaude(async () => {
+      await ask("use", "2"); // user switches while the agent runs
+      throw new AskError("claude failed (exit code 2).");
+    });
+    const r = await ask("claude", "Follow-up for one");
+    assert.match(r.err, /saved to discussion 1; to retry, run: ask use 1 && ask claude\n$/);
+    assert.equal(parse(await store.read(1)).entries.at(-1)?.body, "Follow-up for one");
   });
 
   test("agent failure without a follow-up writes nothing and shows no hint", async () => {
