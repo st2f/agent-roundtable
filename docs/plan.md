@@ -44,7 +44,7 @@ agent-roundtable/
 
 Both adapters are **read-only by CLI flags**, not by prompt:
 
-- **Claude**: `claude -p` with read-only tools (`Read,Grep,Glob`), no MCP servers, no repo settings, hooks disabled. Rules go in the system prompt.
+- **Claude**: `claude -p` with read-only tools (`Read,Grep,Glob`, allowed on any path, like Codex), no MCP servers, no repo settings, hooks disabled. Rules go in the system prompt.
 - **Codex**: `codex exec` with the read-only sandbox, no user config, no web search, no approvals, and every feature not on a reviewed allowlist disabled. Rules go in `developer_instructions`.
 
 Managed (admin) configuration of either CLI can't be overridden from the command line; a hard guarantee in that case needs OS-level isolation.

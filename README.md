@@ -31,7 +31,7 @@ ask show        # print the active discussion (or: ask show 2)
 ask use 2       # switch the active discussion
 ```
 
-Run `ask` from the repository you want the agents to look at. They can read files there but can't change anything: `ask` starts both CLIs with read-only flags. Managed (admin) configuration for Codex or Claude Code still applies and can't be overridden by those flags, so if your setup has any, run the agents in a sandbox or container when you need a hard guarantee.
+Run `ask` from the repository you want the agents to look at. They can read files there and elsewhere on disk, but can't change anything: `ask` starts both CLIs with read-only flags. Managed (admin) configuration for Codex or Claude Code still applies and can't be overridden by those flags, so if your setup has any, run the agents in a sandbox or container when you need a hard guarantee.
 
 ## Storage
 

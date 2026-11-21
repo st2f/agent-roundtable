@@ -46,6 +46,10 @@ describe("claude adapter", () => {
     const flag = (name: string) => args[args.indexOf(name) + 1];
     assert.equal(args[0], "-p");
     assert.equal(flag("--tools"), "Read,Grep,Glob");
+    // Reads are allowed outside the cwd too; nothing else is pre-approved.
+    const allowed = args.indexOf("--allowedTools");
+    assert.deepEqual(args.slice(allowed + 1, allowed + 4), ["Read(//**)", "Grep(//**)", "Glob(//**)"]);
+    assert.ok(args[allowed + 4]?.startsWith("--"));
     assert.equal(flag("--permission-mode"), "dontAsk");
     assert.ok(args.includes("--strict-mcp-config"));
     assert.equal(flag("--setting-sources"), "user"); // repo settings can't add hooks/helpers

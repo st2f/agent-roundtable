@@ -4,6 +4,9 @@ import type { Agent } from "./types.ts";
 /**
  * Read-only by construction; nothing in the prompt can change these flags.
  * - --tools: only read-only built-in tools exist in the session.
+ * - --allowedTools: those tools may read anywhere (`//**` is the filesystem root), not just
+ *   the cwd, so files the discussion mentions by path are readable, as they are for Codex
+ *   in its read-only sandbox. Deny rules from user settings still take precedence.
  * - --permission-mode dontAsk: anything not pre-approved is denied, never prompted.
  * - --strict-mcp-config (with no --mcp-config): no MCP servers, since --tools only
  *   restricts built-in tools and user-configured MCP tools could otherwise write.
@@ -18,6 +21,10 @@ export function claudeArgs(rules: string): string[] {
     "-p",
     "--tools",
     "Read,Grep,Glob",
+    "--allowedTools", // variadic: the next flag ends the list
+    "Read(//**)",
+    "Grep(//**)",
+    "Glob(//**)",
     "--permission-mode",
     "dontAsk",
     "--strict-mcp-config",
