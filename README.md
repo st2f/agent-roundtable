@@ -25,6 +25,8 @@ ask claude        # Claude responds, seeing Codex's answer
 ask codex "Focus on the performance implications"
 ask add "What if we only use it for file discovery?"
 ask claude
+ask codex -m gpt-6.2-sol    # a specific model; saved as codex/gpt-6.2-sol
+ask claude -m opus-5.5 "Do you agree with Codex?"
 
 ask list        # all discussions, * marks the active one
 ask show        # print the active discussion (or: ask show 2)

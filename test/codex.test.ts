@@ -114,6 +114,14 @@ describe("codex adapter", () => {
     assert.equal(args.at(-1), "-");
   });
 
+  test("passes the model with --model only when one is given", async () => {
+    const base = { rules: prompt.rules, disable: [], outputFile: "/tmp/out.md" };
+    assert.ok(!codexArgs(base).includes("--model"));
+    await createCodexAgent(fake).run(prompt, { cwd: dir, model: "gpt-5.6-sol" });
+    const seen = JSON.parse(await readFile(log, "utf8"));
+    assert.equal(seen.argv[seen.argv.indexOf("--model") + 1], "gpt-5.6-sol");
+  });
+
   test("rules go in developer_instructions as a TOML string; stdin carries only the discussion", async () => {
     await createCodexAgent(fake).run(prompt, { cwd: dir });
     const seen = JSON.parse(await readFile(log, "utf8"));

@@ -95,9 +95,10 @@ function tomlString(value: string): string {
  * Not covered: system and managed (admin) Codex configuration still apply and can't be
  * overridden here. A hard guarantee under such configuration needs OS-level isolation.
  */
-export function codexArgs(options: { rules: string; disable: string[]; outputFile: string }): string[] {
+export function codexArgs(options: { rules: string; disable: string[]; outputFile: string; model?: string }): string[] {
   return [
     "exec",
+    ...(options.model === undefined ? [] : ["--model", options.model]),
     "--sandbox",
     "read-only",
     "--skip-git-repo-check",
@@ -123,7 +124,7 @@ export function codexArgs(options: { rules: string; disable: string[]; outputFil
 export function createCodexAgent(command = "codex"): Agent {
   return {
     name: "codex",
-    async run(prompt: AgentPrompt, { cwd, signal }) {
+    async run(prompt: AgentPrompt, { cwd, model, signal }) {
       const disable = await withTempDir("ask-codex-home-", async (emptyHome) => {
         // Effective feature state as `exec --ignore-user-config` sees it: an empty CODEX_HOME
         // has no user config (`features list` has no --ignore-user-config flag).
@@ -143,7 +144,7 @@ export function createCodexAgent(command = "codex"): Agent {
         const outputFile = join(dir, "last-message.md");
         await runAgentProcess("codex", {
           command,
-          args: codexArgs({ rules: prompt.rules, disable, outputFile }),
+          args: codexArgs({ rules: prompt.rules, disable, outputFile, model }),
           input: prompt.input,
           cwd,
           signal,

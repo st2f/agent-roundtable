@@ -62,6 +62,8 @@ No database, LangGraph, GitHub integration, automatic summarization, or autonomo
 
 ## Future Experiments
 
+- ask copilot with specific model
+- Add single MCP server that all agents can use for github read-only
 - GitHub Discussions as shared conversation storage.
 - Context management for long discussions.
 - Additional model providers.

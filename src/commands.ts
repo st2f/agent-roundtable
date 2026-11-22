@@ -1,6 +1,6 @@
 import type { Agent } from "./agents/types.ts";
 import { AskError } from "./errors.ts";
-import { buildPrompt } from "./prompt.ts";
+import { MODEL_NAME, buildPrompt } from "./prompt.ts";
 import * as store from "./store.ts";
 import { extractTitle, parse } from "./transcript.ts";
 
@@ -26,27 +26,62 @@ export interface AgentContext {
   signal?: AbortSignal;
 }
 
+const isModelFlag = (arg = "") => arg === "-m" || arg === "--model" || arg.startsWith("--model=");
+
+/** Leading `-m <model>` / `--model <model>` / `--model=<model>`, then the follow-up words. */
+export function parseAgentArgs(agent: string, args: string[]): { model?: string; words: string[] } {
+  const usage = `Usage: ask ${agent} [-m <model>] ["<prompt>"]`;
+  const [first, ...rest] = args;
+  let model: string | undefined;
+  let words = args;
+  if (first === "-m" || first === "--model") {
+    model = rest[0];
+    words = rest.slice(1);
+    if (model === undefined) throw new AskError(`Missing model. ${usage}`);
+  } else if (first?.startsWith("--model=")) {
+    model = first.slice("--model=".length);
+    words = rest;
+  }
+  if (model !== undefined && !MODEL_NAME.test(model)) {
+    throw new AskError(`Invalid model name: ${JSON.stringify(model)}. ${usage}`);
+  }
+  // A second model flag would otherwise be saved as the follow-up while the first model runs.
+  if (model !== undefined && isModelFlag(words[0])) {
+    throw new AskError(`Only one model per call. To start a prompt with "${words[0]}", put -- before it. ${usage}`);
+  }
+  if (words[0] === "--") words = words.slice(1); // `ask claude -- "-m in my prompt"`
+  return model === undefined ? { words } : { model, words };
+}
+
 /**
- * `ask <agent> ["<prompt>"]`: the follow-up (if any) is saved before the agent runs, and
- * the reply is saved only if the agent succeeds, so a failure never loses or corrupts history.
+ * `ask <agent> [-m <model>] ["<prompt>"]`: the follow-up (if any) is saved before the agent
+ * runs, and the reply is saved only if the agent succeeds, so a failure never loses or
+ * corrupts history.
+ *
+ * With a model, the speaker is `<agent>/<model>` (e.g. `copilot/gpt-5.6-sol`): follow-ups,
+ * replies and the agent's identity in the prompt all use that name, so each model is a
+ * separate participant. Without one it is just `<agent>`.
  */
 export async function askAgent(agent: Agent, args: string[], io: IO, ctx: AgentContext): Promise<void> {
+  const { model, words } = parseAgentArgs(agent.name, args);
+  const speaker = model === undefined ? agent.name : `${agent.name}/${model}`;
   const id = await store.requireActive();
-  const followUp = args.join(" ");
+  const followUp = words.join(" ");
   const hasFollowUp = followUp.trim() !== "";
   if (hasFollowUp) {
-    await store.append(id, { author: "user", to: agent.name, at: new Date().toISOString(), body: followUp });
+    await store.append(id, { author: "user", to: speaker, at: new Date().toISOString(), body: followUp });
   }
 
-  const prompt = buildPrompt(agent.name, parse(await store.read(id)), hasFollowUp ? followUp : undefined);
+  const prompt = buildPrompt(speaker, parse(await store.read(id)), hasFollowUp ? followUp : undefined);
   let reply: string;
-  io.status?.(`${agent.name} is thinking…`);
+  io.status?.(`${speaker} is thinking…`);
   try {
-    reply = await agent.run(prompt, ctx);
+    reply = await agent.run(prompt, model === undefined ? ctx : { ...ctx, model });
   } catch (err) {
     if (err instanceof AskError && hasFollowUp) {
       // Name the discussion explicitly: the active one may have changed while the agent ran.
-      const hint = `Your message was saved to discussion ${id}; to retry, run: ask use ${id} && ask ${agent.name}`;
+      const retry = model === undefined ? `ask ${agent.name}` : `ask ${agent.name} -m ${model}`;
+      const hint = `Your message was saved to discussion ${id}; to retry, run: ask use ${id} && ${retry}`;
       throw new AskError(`${err.message}\n${hint}`, { exitCode: err.exitCode, cause: err });
     }
     throw err;
@@ -54,7 +89,7 @@ export async function askAgent(agent: Agent, args: string[], io: IO, ctx: AgentC
     io.status?.(null);
   }
 
-  await store.append(id, { author: agent.name, at: new Date().toISOString(), cwd: ctx.cwd, body: reply });
+  await store.append(id, { author: speaker, at: new Date().toISOString(), cwd: ctx.cwd, body: reply });
   io.out(`${reply}\n`);
 }
 

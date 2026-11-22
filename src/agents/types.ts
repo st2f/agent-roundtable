@@ -6,6 +6,7 @@ export interface AgentPrompt {
 
 export interface AgentRunOptions {
   cwd: string; // the agent's working directory (where `ask` was run)
+  model?: string; // passed to the CLI verbatim; omitted = the CLI's default model
   signal?: AbortSignal; // aborting interrupts the agent (Ctrl-C)
 }
 

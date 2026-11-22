@@ -16,9 +16,10 @@ import type { Agent } from "./types.ts";
  *   Hooks from managed policy settings can't be disabled here; guaranteeing read-only
  *   behavior under such a policy needs an external isolation boundary (e.g. a sandbox).
  */
-export function claudeArgs(rules: string): string[] {
+export function claudeArgs(rules: string, model?: string): string[] {
   return [
     "-p",
+    ...(model === undefined ? [] : ["--model", model]),
     "--tools",
     "Read,Grep,Glob",
     "--allowedTools", // variadic: the next flag ends the list
@@ -43,10 +44,10 @@ export function claudeArgs(rules: string): string[] {
 export function createClaudeAgent(command = "claude"): Agent {
   return {
     name: "claude",
-    async run(prompt, { cwd, signal }) {
+    async run(prompt, { cwd, model, signal }) {
       const result = await runAgentProcess("claude", {
         command,
-        args: claudeArgs(prompt.rules),
+        args: claudeArgs(prompt.rules, model),
         input: prompt.input, // -p without a prompt argument reads it from stdin
         cwd,
         signal,

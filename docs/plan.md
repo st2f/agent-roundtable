@@ -32,15 +32,17 @@ agent-roundtable/
 | --- | --- |
 | `ask new "<question>"` | Create a discussion and make it active. |
 | `ask add "<text>"` | Append a user entry. No model call. |
-| `ask codex ["<prompt>"]` | Save the optional follow-up, run Codex on the discussion, append and print its reply. |
-| `ask claude ["<prompt>"]` | Same with Claude. |
+| `ask codex [-m <model>] ["<prompt>"]` | Save the optional follow-up, run Codex on the discussion, append and print its reply. |
+| `ask claude [-m <model>] ["<prompt>"]` | Same with Claude. |
 | `ask list` | List discussions, `*` marks the active one. |
 | `ask show [N]` | Print the active (or given) discussion. |
 | `ask use N` | Switch the active discussion. |
 
 ## Agents
 
-`Agent.run({ rules, input }, { cwd, signal })` returns the reply text. Agents run in the current directory; storage is independent of it.
+`Agent.run({ rules, input }, { cwd, model, signal })` returns the reply text. Agents run in the current directory; storage is independent of it.
+
+`-m` passes a model to the CLI verbatim. The speaker is then `<agent>/<model>` (e.g. `claude/opus-5.5`): each model is a separate participant for authorship, follow-ups and its own identity in the prompt.
 
 Both adapters are **read-only by CLI flags**, not by prompt:
 

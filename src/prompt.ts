@@ -3,6 +3,12 @@ import type { Discussion, Entry } from "./transcript.ts";
 
 const DEFAULT_REQUEST = "Give your contribution to the discussion above.";
 
+// A model name starts with a letter or digit, so an agent CLI can't read it as a flag.
+const MODEL_SOURCE = /[A-Za-z0-9][\w.:@/+-]{0,99}/.source;
+export const MODEL_NAME = new RegExp(`^${MODEL_SOURCE}$`);
+// A speaker is an agent name, optionally with its model: `codex` or `copilot/gpt-5.6-sol`.
+const SPEAKER_NAME = new RegExp(`^[\\w-]{1,32}(/${MODEL_SOURCE})?$`);
+
 export function rules(agent: string): string {
   return `You are ${agent}, participating in a discussion with the user and other
 coding agents.
@@ -48,11 +54,12 @@ export function requestSection(agent: string, entries: Entry[]): string {
   if (i === -1) return `Current request:\n${DEFAULT_REQUEST}`;
 
   const section = `Current request (from the user, entry ${i + 1}):\n${entries[i]?.body}`;
-  // Author names come from the transcript file; anything but a plain identifier stays in the block.
+  // Author names come from the transcript file; anything but a plain identifier (optionally
+  // `agent/model`) stays in the block.
   const label = (name: string) =>
     name === agent
       ? `${name}, you`
-      : /^[\w-]{1,32}$/.test(name)
+      : SPEAKER_NAME.test(name)
         ? name
         : "another agent";
   const replies = entries

@@ -219,6 +219,84 @@ describe("cli", () => {
     assert.deepEqual(requests, ["first request", "second request"]);
   });
 
+  test("ask claude -m <model>: the model reaches the agent and is part of the speaker's name", async () => {
+    await ask("new", "Q?");
+    await ask("claude", "-m", "opus-5.5", "Your", "view?");
+    await ask("claude", "--model=claude-sonnet-5-5");
+    assert.deepEqual(
+      calls.map((c) => c.options.model),
+      ["opus-5.5", "claude-sonnet-5-5"],
+    );
+    assert.match(calls[0]?.prompt.rules ?? "", /^You are claude\/opus-5\.5,/);
+
+    const entries = parse(await store.read(1)).entries;
+    assert.deepEqual(
+      entries.map((e) => [e.author, e.to, e.body]),
+      [
+        ["user", undefined, "Q?"],
+        ["user", "claude/opus-5.5", "Your view?"],
+        ["claude/opus-5.5", undefined, "fake reply"],
+        ["claude/claude-sonnet-5-5", undefined, "fake reply"],
+      ],
+    );
+    // The second model is a different participant: the first one's reply is listed as another's.
+    assert.match(calls[1]?.prompt.input ?? "", /Replies since then: entry 3 \(claude\/opus-5\.5\)\./);
+  });
+
+  test("a follow-up to one model is not the request for another, nor for the default", async () => {
+    await ask("new", "Q?");
+    await store.append(1, { author: "user", to: "claude/opus-5.5", at: "t", body: "Only for Opus" });
+    await ask("claude", "-m", "gpt-5.6-sol");
+    await ask("claude");
+    for (const call of calls) {
+      assert.match(call.prompt.input, /Current request \(from the user, entry 1\):\nQ\?/);
+    }
+    await ask("claude", "-m", "opus-5.5");
+    assert.match(calls.at(-1)?.prompt.input ?? "", /Current request \(from the user, entry 2\):\nOnly for Opus/);
+  });
+
+  test("ask claude without -m: no model is passed", async () => {
+    await ask("new", "Q?");
+    await ask("claude", "--", "-m is just text here");
+    assert.equal(calls[0]?.options.model, undefined);
+    assert.equal(parse(await store.read(1)).entries.at(-1)?.author, "claude");
+    assert.equal(parse(await store.read(1)).entries.at(-2)?.body, "-m is just text here");
+    // With a model, -- still lets the prompt start with a model flag.
+    await ask("claude", "-m", "opus", "--", "--model sonnet would be wrong here");
+    assert.equal(calls[1]?.options.model, "opus");
+    assert.equal(parse(await store.read(1)).entries.at(-2)?.body, "--model sonnet would be wrong here");
+  });
+
+  test("bad -m usage fails before anything is saved or run", async () => {
+    await ask("new", "Q?");
+    const before = await store.read(1);
+    const cases: [string[], RegExp][] = [
+      [["claude", "-m"], /Missing model\. Usage: ask claude \[-m <model>\]/],
+      [["claude", "--model="], /Invalid model name: ""/],
+      [["claude", "-m", "--yolo", "hi"], /Invalid model name: "--yolo"/],
+      [["claude", "-m", "opus 5.5"], /Invalid model name/],
+      [["claude", "-m", "opus", "--model", "sonnet"], /Only one model per call/],
+      [["claude", "--model=opus", "-m", "sonnet", "hi"], /Only one model per call/],
+      [["claude", "-m", "opus", "--model=sonnet"], /Only one model per call/],
+    ];
+    for (const [args, pattern] of cases) {
+      const r = await ask(...args);
+      assert.equal(r.code, 1, args.join(" "));
+      assert.match(r.err, pattern, args.join(" "));
+    }
+    assert.equal(calls.length, 0);
+    assert.equal(await store.read(1), before);
+  });
+
+  test("retry hint repeats the model", async () => {
+    await ask("new", "Q?");
+    useFakeClaude(() => {
+      throw new AskError("claude failed (exit code 2).");
+    });
+    const r = await ask("claude", "-m", "opus-5.5", "Follow-up");
+    assert.match(r.err, /to retry, run: ask use 1 && ask claude -m opus-5\.5\n$/);
+  });
+
   test("ask claude sees earlier contributions, including other agents'", async () => {
     await ask("new", "Q?");
     await store.append(1, { author: "codex", at: "t", cwd: "/x", body: "Codex says no." });

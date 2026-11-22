@@ -22,6 +22,9 @@ Discussions:
 Agents:
   ask codex ["<prompt>"]   Ask Codex to contribute (optional follow-up prompt)
   ask claude ["<prompt>"]  Ask Claude to contribute (optional follow-up prompt)
+  ask <agent> -m <model> ["<prompt>"]
+                           Use a specific model; each model is a separate participant
+                           (e.g. ask claude -m opus-5.5 → claude/opus-5.5)
 
 Discussions are stored in ${storageDir()}
 `;

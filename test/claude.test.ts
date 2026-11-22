@@ -70,6 +70,14 @@ describe("claude adapter", () => {
     assert.equal(await realpath(seen.cwd), await realpath(dir));
   });
 
+  test("passes the model with --model only when one is given", async () => {
+    assert.ok(!claudeArgs("RULES").includes("--model"));
+    await createClaudeAgent(fake).run(prompt, { cwd: dir, model: "opus-5.5" });
+    const seen = JSON.parse(await readFile(log, "utf8"));
+    assert.deepEqual(seen.argv, claudeArgs("RULES", "opus-5.5"));
+    assert.equal(seen.argv[seen.argv.indexOf("--model") + 1], "opus-5.5");
+  });
+
   test("non-zero exit becomes an AskError with the stderr tail", async () => {
     process.env.FAKE_MODE = "fail";
     await assert.rejects(createClaudeAgent(fake).run(prompt, { cwd: dir }), (err: unknown) => {
