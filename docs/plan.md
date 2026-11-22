@@ -34,6 +34,7 @@ agent-roundtable/
 | `ask add "<text>"` | Append a user entry. No model call. |
 | `ask codex [-m <model>] ["<prompt>"]` | Save the optional follow-up, run Codex on the discussion, append and print its reply. |
 | `ask claude [-m <model>] ["<prompt>"]` | Same with Claude. |
+| `ask copilot -m <model> ["<prompt>"]` | Same with GitHub Copilot; a specific model is required (`auto` would put several models under one voice). |
 | `ask list` | List discussions, `*` marks the active one. |
 | `ask show [N]` | Print the active (or given) discussion. |
 | `ask use N` | Switch the active discussion. |
@@ -44,12 +45,13 @@ agent-roundtable/
 
 `-m` passes a model to the CLI verbatim. The speaker is then `<agent>/<model>` (e.g. `claude/opus-5.5`): each model is a separate participant for authorship, follow-ups and its own identity in the prompt.
 
-Both adapters are **read-only by CLI flags**, not by prompt:
+All adapters are **read-only by CLI flags**, not by prompt:
 
 - **Claude**: `claude -p` with read-only tools (`Read,Grep,Glob`, allowed on any path, like Codex), no MCP servers, no repo settings, hooks disabled. Rules go in the system prompt.
 - **Codex**: `codex exec` with the read-only sandbox, no user config, no web search, no approvals, and every feature not on a reviewed allowlist disabled. Rules go in `developer_instructions`.
+- **Copilot**: prompt mode with only `view`, `grep`, `glob` available (reads on any path), shell/write/memory/URL denied, no built-in MCP servers, no repo instructions. The user's Copilot settings are not overridden, so their hooks (and trusted repos' hooks) still run. Rules go first on stdin. Flags reviewed against 1.0.114; a live test, skipped by default, checks them against the real CLI.
 
-Managed (admin) configuration of either CLI can't be overridden from the command line; a hard guarantee in that case needs OS-level isolation.
+Managed (admin) configuration of any CLI can't be overridden from the command line; a hard guarantee in that case needs OS-level isolation.
 
 ## Prompt
 

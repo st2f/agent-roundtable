@@ -6,7 +6,7 @@ const DEFAULT_REQUEST = "Give your contribution to the discussion above.";
 // A model name starts with a letter or digit, so an agent CLI can't read it as a flag.
 const MODEL_SOURCE = /[A-Za-z0-9][\w.:@/+-]{0,99}/.source;
 export const MODEL_NAME = new RegExp(`^${MODEL_SOURCE}$`);
-// A speaker is an agent name, optionally with its model: `codex` or `copilot/gpt-5.6-sol`.
+// A speaker is an agent name, optionally with its model: `codex` or `copilot/gpt-6.2-sol`.
 const SPEAKER_NAME = new RegExp(`^[\\w-]{1,32}(/${MODEL_SOURCE})?$`);
 
 export function rules(agent: string): string {

@@ -22,6 +22,8 @@ Discussions:
 Agents:
   ask codex ["<prompt>"]   Ask Codex to contribute (optional follow-up prompt)
   ask claude ["<prompt>"]  Ask Claude to contribute (optional follow-up prompt)
+  ask copilot -m <model> ["<prompt>"]
+                           Ask GitHub Copilot, using the given model (required)
   ask <agent> -m <model> ["<prompt>"]
                            Use a specific model; each model is a separate participant
                            (e.g. ask claude -m opus-5.5 → claude/opus-5.5)

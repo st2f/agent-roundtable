@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -64,11 +72,15 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  for (const key of ["FAKE_LOG", "FAKE_MODE", "FAKE_FEATURES"]) delete process.env[key];
+  for (const key of ["FAKE_LOG", "FAKE_MODE", "FAKE_FEATURES"])
+    delete process.env[key];
   await rm(dir, { recursive: true, force: true });
 });
 
-const prompt = { rules: 'RULES with "quotes"\nand a second line', input: "<discussion>…</discussion>" };
+const prompt = {
+  rules: 'RULES with "quotes"\nand a second line',
+  input: "<discussion>…</discussion>",
+};
 
 describe("codex feature allowlist", () => {
   test("parses names, multi-word stages and states", () => {
@@ -79,18 +91,33 @@ describe("codex feature allowlist", () => {
   });
 
   test("unparsable or empty output is an error, not an empty disable list", () => {
-    assert.throws(() => parseFeatures("apps stable true\nsurprise\n"), AskError);
+    assert.throws(
+      () => parseFeatures("apps stable true\nsurprise\n"),
+      AskError,
+    );
     assert.throws(() => parseFeatures("\n"), AskError);
   });
 
   test("disables every known feature that isn't allowlisted, whatever its probed state", () => {
     // goals is probed off but disabled anyway (workspace defaults can turn it on at run time);
     // worktrees is removed and skipped; allowlisted features stay on.
-    assert.deepEqual(featuresToDisable(parseFeatures(FEATURES)), ["apps", "shiny_new_thing", "goals"]);
+    assert.deepEqual(featuresToDisable(parseFeatures(FEATURES)), [
+      "apps",
+      "shiny_new_thing",
+      "goals",
+    ]);
   });
 
   test("risky features are not allowlisted", () => {
-    for (const f of ["apps", "plugins", "hooks", "computer_use", "browser_use", "daemon_auto_start", "multi_agent"]) {
+    for (const f of [
+      "apps",
+      "plugins",
+      "hooks",
+      "computer_use",
+      "browser_use",
+      "daemon_auto_start",
+      "multi_agent",
+    ]) {
       assert.ok(!CODEX_ALLOWED_FEATURES.has(f), f);
     }
   });
@@ -98,16 +125,27 @@ describe("codex feature allowlist", () => {
 
 describe("codex adapter", () => {
   test("read-only flags are always present", () => {
-    const args = codexArgs({ rules: prompt.rules, disable: ["apps", "hooks"], outputFile: "/tmp/out.md" });
+    const args = codexArgs({
+      rules: prompt.rules,
+      disable: ["apps", "hooks"],
+      outputFile: "/tmp/out.md",
+    });
     const flag = (name: string) => args[args.indexOf(name) + 1];
     assert.equal(args[0], "exec");
     assert.equal(flag("--sandbox"), "read-only");
-    for (const f of ["--skip-git-repo-check", "--ephemeral", "--ignore-user-config", "--ignore-rules"]) {
+    for (const f of [
+      "--skip-git-repo-check",
+      "--ephemeral",
+      "--ignore-user-config",
+      "--ignore-rules",
+    ]) {
       assert.ok(args.includes(f), f);
     }
     assert.ok(args.includes('approval_policy="never"'));
     assert.ok(args.includes('web_search="disabled"'));
-    const disabled = args.flatMap((a, i) => (args[i - 1] === "--disable" ? [a] : []));
+    const disabled = args.flatMap((a, i) =>
+      args[i - 1] === "--disable" ? [a] : [],
+    );
     assert.deepEqual(disabled, ["apps", "hooks"]);
     assert.ok(!args.some((a) => a.includes("dangerously")));
     assert.equal(flag("-o"), "/tmp/out.md");
@@ -115,11 +153,18 @@ describe("codex adapter", () => {
   });
 
   test("passes the model with --model only when one is given", async () => {
-    const base = { rules: prompt.rules, disable: [], outputFile: "/tmp/out.md" };
+    const base = {
+      rules: prompt.rules,
+      disable: [],
+      outputFile: "/tmp/out.md",
+    };
     assert.ok(!codexArgs(base).includes("--model"));
-    await createCodexAgent(fake).run(prompt, { cwd: dir, model: "gpt-5.6-sol" });
+    await createCodexAgent(fake).run(prompt, {
+      cwd: dir,
+      model: "gpt-6.2-sol",
+    });
     const seen = JSON.parse(await readFile(log, "utf8"));
-    assert.equal(seen.argv[seen.argv.indexOf("--model") + 1], "gpt-5.6-sol");
+    assert.equal(seen.argv[seen.argv.indexOf("--model") + 1], "gpt-6.2-sol");
   });
 
   test("rules go in developer_instructions as a TOML string; stdin carries only the discussion", async () => {
@@ -127,7 +172,9 @@ describe("codex adapter", () => {
     const seen = JSON.parse(await readFile(log, "utf8"));
     assert.equal(seen.input, prompt.input);
 
-    const override = seen.argv.find((a: string) => a.startsWith("developer_instructions="));
+    const override = seen.argv.find((a: string) =>
+      a.startsWith("developer_instructions="),
+    );
     const value = override.slice("developer_instructions=".length);
     assert.match(value, /^"[^\n]*"$/, "single-line quoted string");
     assert.equal(JSON.parse(value), prompt.rules);
@@ -142,7 +189,9 @@ describe("codex adapter", () => {
     await assert.rejects(stat(features.home), { code: "ENOENT" }); // removed afterwards
 
     const seen = JSON.parse(await readFile(log, "utf8"));
-    const disabled = seen.argv.flatMap((a: string, i: number) => (seen.argv[i - 1] === "--disable" ? [a] : []));
+    const disabled = seen.argv.flatMap((a: string, i: number) =>
+      seen.argv[i - 1] === "--disable" ? [a] : [],
+    );
     assert.deepEqual(disabled, ["apps", "shiny_new_thing", "goals"]);
   });
 
@@ -158,18 +207,28 @@ describe("codex adapter", () => {
   test("if the feature list can't be read, codex exec never runs", async () => {
     for (const mode of ["features-fail", "features-garbage"]) {
       process.env.FAKE_MODE = mode;
-      await assert.rejects(createCodexAgent(fake).run(prompt, { cwd: dir }), AskError, mode);
+      await assert.rejects(
+        createCodexAgent(fake).run(prompt, { cwd: dir }),
+        AskError,
+        mode,
+      );
       await assert.rejects(stat(log), { code: "ENOENT" }, mode);
     }
   });
 
   test("non-zero exit becomes an AskError with the stderr tail", async () => {
     process.env.FAKE_MODE = "fail";
-    await assert.rejects(createCodexAgent(fake).run(prompt, { cwd: dir }), (err: unknown) => {
-      assert.ok(err instanceof AskError);
-      assert.equal(err.message, "codex failed (exit code 1).\n  ERROR: model_not_found");
-      return true;
-    });
+    await assert.rejects(
+      createCodexAgent(fake).run(prompt, { cwd: dir }),
+      (err: unknown) => {
+        assert.ok(err instanceof AskError);
+        assert.equal(
+          err.message,
+          "codex failed (exit code 1).\n  ERROR: model_not_found",
+        );
+        return true;
+      },
+    );
   });
 
   test("success without an output file is a failure", async () => {
@@ -189,16 +248,25 @@ describe("codex adapter", () => {
   });
 
   test("missing binary gives a clear message", async () => {
-    await assert.rejects(createCodexAgent(join(dir, "nope")).run(prompt, { cwd: dir }), {
-      name: "AskError",
-      message: /^codex CLI not found in PATH/,
-    });
+    await assert.rejects(
+      createCodexAgent(join(dir, "nope")).run(prompt, { cwd: dir }),
+      {
+        name: "AskError",
+        message: /^codex CLI not found in PATH/,
+      },
+    );
   });
 });
 
 describe("withTempDir", () => {
   test("removes the dir even when the process exits mid-run (second Ctrl-C)", async () => {
-    const common = join(import.meta.dirname, "..", "src", "agents", "common.ts");
+    const common = join(
+      import.meta.dirname,
+      "..",
+      "src",
+      "agents",
+      "common.ts",
+    );
     const script = `
       const { withTempDir } = await import(${JSON.stringify(common)});
       await withTempDir("ask-exit-test-", async (d) => {
@@ -207,7 +275,11 @@ describe("withTempDir", () => {
       });
     `;
     const run = promisify(execFile);
-    const err = await run(process.execPath, ["--input-type=module", "-e", script]).catch((e) => e);
+    const err = await run(process.execPath, [
+      "--input-type=module",
+      "-e",
+      script,
+    ]).catch((e) => e);
     assert.equal(err.code, 130);
     const tempDir = String(err.stdout).trim();
     assert.ok(tempDir.includes("ask-exit-test-"), tempDir);
